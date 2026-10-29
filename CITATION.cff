@@ -1,0 +1,38 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite it as below and also cite the EVBattery dataset."
+title: "battery-soh-ev-online: capacity and SOH estimation from everyday EV charging snippets"
+abstract: >-
+  A reproducible pipeline that estimates absolute battery capacity (Ah) and
+  state of health (SOH) from a single everyday electric-vehicle charging
+  session, using 114 features from coulomb-count quantities and incremental
+  capacity (dQ/dV) shape. Validated on the full Tsinghua EVBattery dataset
+  (464 cars, 173,437 charging sessions) with a leave-cars-out protocol.
+  Reference implementation: 0.826 Ah RMSE / 0.832 R2 / 1.94 SOH percentage
+  points on unseen vehicles, with calibrated 90% prediction intervals.
+version: 1.0.0
+date-released: 2026-10-29
+license: MIT
+repository-code: "https://github.com/ilo-love7/battery-soh-ev-online"
+keywords:
+  - battery
+  - state-of-health
+  - SOH
+  - electric-vehicle
+  - incremental-capacity
+  - conformal-prediction
+  - EVBattery
+authors:
+  - name: "ilo-love7"
+references:
+  - type: article
+    title: "EVBattery: A Large-Scale Electric Vehicle Dataset for Battery Health and Capacity Estimation"
+    authors:
+      - name: "He, Mingqiang"
+    journal: "arXiv preprint arXiv:2201.12358"
+    year: 2022
+    url: "https://arxiv.org/abs/2201.12358"
+  - type: dataset
+    title: "EVBattery dataset"
+    doi: "10.6084/m9.figshare.23301881"
+    year: 2023
+    license: "CC-BY-NC-SA-4.0"

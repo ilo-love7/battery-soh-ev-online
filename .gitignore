@@ -1,0 +1,19 @@
+# 大体积中间产物（可重算，不进 git）
+results/cache/*.parquet
+results/cache/*.log
+results/metrics/*_oof.parquet
+results/metrics/oof_predictions.parquet
+results/figures/*.png
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

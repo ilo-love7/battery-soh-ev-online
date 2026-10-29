@@ -1,0 +1,12 @@
+# 项目 A2 运行依赖（Python 3.12）
+# 环境：D:\项目\venvs\flsoh-py312
+numpy>=2.0
+pandas>=2.2
+pyarrow>=15.0
+scikit-learn>=1.5
+xgboost>=2.0
+joblib>=1.4
+matplotlib>=3.8
+pyyaml>=6.0
+torch>=2.2          # 仅用于读取 EVBattery 的 pkl（旧版 torch 序列化格式）
+pytest>=8.0

@@ -1,0 +1,54 @@
+{
+  "windows_total": 1278277,
+  "windows_valid_rate": 0.9418592370824164,
+  "sessions_all": 173437,
+  "cars_all": 464,
+  "sessions_labeled": 38744,
+  "cars_labeled": 191,
+  "per_dataset": [
+    {
+      "dataset": "battery_dataset1",
+      "windows": 629121,
+      "sessions_all": 97099,
+      "cars_all": 217,
+      "sessions_labeled": 23376,
+      "cars_labeled": 100,
+      "cap_cover": 0.24074398294524146
+    },
+    {
+      "dataset": "battery_dataset2",
+      "windows": 472829,
+      "sessions_all": 63960,
+      "cars_all": 198,
+      "sessions_labeled": 14212,
+      "cars_labeled": 83,
+      "cap_cover": 0.22220137585991245
+    },
+    {
+      "dataset": "battery_dataset3",
+      "windows": 176327,
+      "sessions_all": 12378,
+      "cars_all": 49,
+      "sessions_labeled": 1156,
+      "cars_labeled": 8,
+      "cap_cover": 0.09339150105025044
+    }
+  ],
+  "soh_label": {
+    "sessions_in": 38744,
+    "cars_in": 191,
+    "labeled_sessions": 38744,
+    "cars_kept": 191,
+    "sessions_kept": 38744,
+    "dropped_by_clip": 0,
+    "soh_min": 0.6001246784291302,
+    "soh_median": 0.9719420093381292,
+    "soh_max": 1.0803661868020662,
+    "soh_p05": 0.8953879811362652
+  },
+  "coulomb_scale_median": 3.4851539945704038,
+  "coulomb_scale_iqr": 0.42731609131451576,
+  "n_sessions_scale_diag": 38725,
+  "d_soc_median": 57.56666666666668,
+  "quality_median": 0.9431390579275982
+}
