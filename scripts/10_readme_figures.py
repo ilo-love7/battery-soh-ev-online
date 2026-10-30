@@ -617,6 +617,117 @@ def fig_budget_additivity() -> None:
     _save(fig, "budget_additivity.png")
 
 
+def fig_online_calibration() -> None:
+    """Streaming calibration: how much of the error the labels buy, and how fast to forget."""
+    d = _load("online_noise_decision.json")["online"]
+    hb = int(d["best_half"]["half"])
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.4, 3.7))
+    for key, c, ls, lab in ((f"lab_ewma_H{hb}", C_MAIN, "-", f"exponential forgetting (half-life {hb} labels)"),
+                            ("win", C_ACC, "-.", "static last 8 sessions")):
+        pts = d["curve_gain"].get(key)
+        if not pts:
+            continue
+        axes[0].plot([p["lo"] for p in pts], [p["cut_pct"] for p in pts],
+                     marker="o", ms=3.8, lw=1.7, color=c, ls=ls, label=lab)
+    axes[0].axhline(0, color=C_GRAY, ls=":", lw=1.0)
+    axes[0].text(d["curve"]["none"][0]["lo"], 0.5, "no calibration (= zero-shot)",
+                 fontsize=7.0, color=C_GRAY)
+    axes[0].set_xscale("log")
+    axes[0].set_xticks([p["lo"] for p in d["curve"]["none"]])
+    axes[0].set_xticklabels([f"≥{p['lo']}" for p in d["curve"]["none"]], fontsize=8)
+    axes[0].set_ylim(0, 22)
+    axes[0].set_xlabel("Labelled sessions accumulated so far")
+    axes[0].set_ylabel("Error cut vs zero-shot (%)")
+    axes[0].set_title("The deployable convergence curve (past labels only)",
+                      fontsize=9.4, pad=8)
+    axes[0].legend(fontsize=7.2, loc="lower right", framealpha=0.92)
+
+    cads = [1, 3, 10]
+    width = 0.26
+    for i, (key, lab, c) in enumerate((("win|m8", "static last 8", C_ACC),
+                                       ("lab_ewma", "forget per label", C_MAIN),
+                                       ("time_ewma", "forget per session", C_RED))):
+        vals = [d["by_cadence"][str(cd)][key]["rmse"] for cd in cads]
+        xi = np.arange(len(cads)) + (i - 1) * width
+        axes[1].bar(xi, vals, width=width, color=c, label=lab)
+        for x, v in zip(xi, vals):
+            axes[1].text(x, v + 0.006, f"{v:.3f}", ha="center", fontsize=6.9, rotation=90)
+    axes[1].axhline(d["by_cadence"]["1"]["none"]["rmse"], color=C_GRAY, ls="--", lw=1.0)
+    axes[1].text(len(cads) - 0.5, d["by_cadence"]["1"]["none"]["rmse"] + 0.004,
+                 "zero-shot", fontsize=7.2, color=C_GRAY, ha="right")
+    axes[1].set_xticks(np.arange(len(cads)))
+    axes[1].set_xticklabels(["1 label per session", "per 3 sessions", "per 10 sessions"],
+                            fontsize=8)
+    axes[1].set_ylabel("Session RMSE (Ah, y truncated)")
+    axes[1].set_ylim(min(d["by_cadence"]["1"]["win|m8"]["rmse"], 0.6) - 0.09,
+                     d["by_cadence"]["1"]["none"]["rmse"] + 0.06)
+    axes[1].set_title("Sparser labels: do not forget by the calendar",
+                      fontsize=9.4, pad=8)
+    axes[1].legend(fontsize=7.2, loc="upper left", framealpha=0.92)
+    axes[1].grid(axis="x", visible=False)
+    fig.tight_layout()
+    _save(fig, "online_calibration.png")
+
+
+def fig_decision_limits() -> None:
+    """What the accuracy is worth downstream: ranking, screening and interval width."""
+    d = _load("online_noise_decision.json")["decision"]
+
+    fig, axes = plt.subplots(1, 3, figsize=(11.8, 3.5))
+    bins = [b for b in d["resolution"]["bins"] if np.isfinite(b["order_acc"])]
+    xs = np.arange(len(bins))
+    axes[0].plot(xs, [b["order_acc"] * 100 for b in bins], marker="o", color=C_MAIN, lw=1.8)
+    axes[0].axhline(50, color=C_GRAY, ls=":", lw=1.0)
+    for i, b in enumerate(bins):
+        axes[0].annotate(f"{b['order_acc']*100:.0f}%", (i, b["order_acc"] * 100),
+                         textcoords="offset points", xytext=(0, 8), ha="center", fontsize=7.4)
+    axes[0].set_xticks(xs)
+    axes[0].set_xticklabels([f"{b['lo']:g}–{b['hi']:g}" for b in bins], fontsize=8)
+    axes[0].set_xlabel("True SOH difference between two cars (pp)")
+    axes[0].set_ylabel("Probability of ranking them correctly (%)")
+    axes[0].set_ylim(45, 102)
+    axes[0].set_title("Resolution: how far apart must cars be?", fontsize=9.2, pad=8)
+
+    scr = d["screening"]
+    axes[1].plot(scr["picked_pct"], [v * 100 for v in scr["zero"]], marker="s", ms=3.4,
+                 lw=1.5, color=C_GRAY, label="zero-shot")
+    axes[1].plot(scr["picked_pct"], [v * 100 for v in scr["online"]], marker="o", ms=3.6,
+                 lw=1.8, color=C_MAIN, label="online calibration")
+    axes[1].plot([0, max(scr["picked_pct"])],
+                 [0, min(100.0, max(scr["picked_pct"]) / 10 * 100)],
+                 ls=":", lw=1.0, color=C_RED, label="random inspection")
+    axes[1].axvline(10, color=C_GRAY, ls="--", lw=0.9)
+    axes[1].set_xlabel("Inspection budget (% of fleet)")
+    axes[1].set_ylabel("Recall of the worst 10% (%)")
+    axes[1].set_ylim(0, 105)
+    axes[1].set_title("Batch screening: how fast recall grows", fontsize=9.2, pad=8)
+    axes[1].legend(fontsize=7.2, loc="lower right", framealpha=0.92)
+
+    names = ["zero-shot", "static 8", "online"]
+    vals = [d[k]["rmse"] for k in ("zero", "static8", "online")]
+    xi = np.arange(3)
+    axes[2].bar(xi - 0.19, vals, width=0.36, color=C_MAIN, label="RMSE (Ah)")
+    ax2 = axes[2].twinx()
+    ax2.bar(xi + 0.19, [d[k]["width"] for k in ("zero", "static8", "online")],
+            width=0.36, color=C_ACC, alpha=0.85, label="90% width (Ah)")
+    ax2.grid(visible=False)
+    for i, v in enumerate(vals):
+        axes[2].text(i - 0.19, v + 0.01, f"{v:.3f}", ha="center", fontsize=7.4)
+    for i, k in enumerate(("zero", "static8", "online")):
+        ax2.text(i + 0.19, d[k]["width"] + 0.02, f"{d[k]['width']:.2f}", ha="center", fontsize=7.4)
+    axes[2].set_xticks(xi)
+    axes[2].set_xticklabels(names, fontsize=8.4)
+    axes[2].set_ylabel("Car-level RMSE (Ah)", fontsize=9)
+    ax2.set_ylabel("90% interval width (Ah)", fontsize=9, color=C_ACC)
+    axes[2].set_ylim(0, max(vals) * 1.25)
+    ax2.set_ylim(0, max(d[k]["width"] for k in ("zero", "static8", "online")) * 1.25)
+    axes[2].set_title("Car-level report: 0.71 → 0.45 Ah", fontsize=9.2, pad=8)
+    axes[2].grid(axis="x", visible=False)
+    fig.tight_layout()
+    _save(fig, "decision_limits.png")
+
+
 def main() -> None:
     print("writing README figures ->", os.path.relpath(OUT, ROOT))
     fig_hero()
@@ -634,6 +745,8 @@ def main() -> None:
     fig_interval_floor()
     fig_aggregate_personalize()
     fig_budget_additivity()
+    fig_online_calibration()
+    fig_decision_limits()
     print("done")
 
 

@@ -200,6 +200,8 @@ python scripts/17_sequence_model.py        # raw curves vs manual features + fig
 python scripts/18_ensemble_intervals.py    # deep ensemble vs CQR + figures 31–32
 python scripts/19_model_frontier.py        # 5 families × 4 feature sets × 6 variants + figures 33–34, ~38 min
 python scripts/20_interval_floor.py        # same-car averaging + label-noise floor + figures 35–36
+python scripts/21_aggregate_personalize.py # averaging x labelled sessions, aggregators, bias drift + figures 37–38
+python scripts/22_online_noise_decision.py # streaming calibration, block noise, decision metrics + figures 39–41, ~3 min
 ```
 
 `EVBATTERY_ROOT` must point at the directory containing `battery_dataset1/2/3`. Scripts 17 and 18 need either the raw pickles or the caches from steps 01–02; everything else reads only `session_features.parquet`.
@@ -564,6 +566,77 @@ Read it as a cost order: take the free lever first (8 charges, −33%), then dec
   <img src="docs/figures/budget_additivity.png" width="740" alt="Measured versus predicted RMSE from the error budget, and bias variance removed by personalisation">
 </p>
 
+### 12. Calibration is a state-estimation problem, not a one-off fit
+
+Section 11 assumed the m labelled sessions are handed over once, at the end. Deployment is not like that: the car keeps running and labels keep arriving, so the estimate should be updated as they come. Two facts from section 11 were explained but never used: car bias drifts (only ~60% transfers across time), and 19.5% of labels are copies. This section turns both into methods.
+
+Protocol: every car sorted by odometer; when predicting session *t*, only the labels that arrived **before** *t* may be used; the first 10 sessions are cold start. `L` is the label cadence (one labelled session per L sessions). Bias is defined as `e = pred − y` and shrunk by effective sample size (`b × n_eff/(n_eff+5)`, the same λ as section 4).
+
+| Estimator | RMSE (Ah) | MAE (Ah) | vs zero-shot |
+|---|---|---|---|
+| Zero-shot | 0.8207 | 0.5554 | — |
+| Cumulative mean (all history) | 0.7283 | 0.4828 | −11.3% |
+| Static last 8 (section 11's rule) | 0.6999 | 0.4613 | −14.7% |
+| **Exponential forgetting, half-life 5 labels** | **0.6867** | **0.4508** | **−16.3%** |
+| Local linear extrapolation of bias | 0.8174 | 0.5577 | −0.4% |
+
+**Forgetting beats accumulating.** The cumulative mean loses 3.4 pp to a static window and 5 pp to exponential forgetting — old history looks like noise because the bias moves. The half-life is forgiving: 2/3/5/8/12/20/40 labels give 0.7005/0.6916/0.6867/0.6874/0.6909/0.6975/0.7079, a 0.4% plateau between 5 and 12. Linear extrapolation of the bias is a clean negative: drift is not a straight line, and pushing a noisy slope one step forward gives the variance straight back.
+
+**Forget per label, not per calendar session.** Same estimator, only the definition of "age" changes:
+
+| Label cadence | zero-shot | static last 8 | static last 20 | forget per label | forget per session |
+|---|---|---|---|---|---|
+| 1 label / session | 0.8207 | 0.6999 | 0.6975 | **0.6867** | 0.6867 |
+| 1 label / 3 sessions | 0.8207 | 0.7204 | 0.7217 | **0.7108** | 0.7240 |
+| 1 label / 10 sessions | 0.8207 | 0.7459 | 0.7493 | **0.7392** | 0.7700 |
+
+The two are identical when labels arrive every session; the gap grows to 4.0% at one label per ten sessions. Decaying by calendar time discounts the only nearby label to 1/1024, which is the opposite of what sparse labels need.
+
+**The convergence curve does not converge — it starts flat.** Same streaming protocol, only cars with ≥110 sessions so every bin is the same fleet:
+
+| Labels accumulated | 10+ | 15+ | 20+ | 30+ | 50+ | 100+ |
+|---|---|---|---|---|---|---|
+| zero-shot RMSE (Ah) | 0.861 | 0.888 | 0.885 | 0.821 | 0.689 | 0.844 |
+| forgetting RMSE (Ah) | 0.737 | 0.757 | 0.788 | 0.702 | 0.573 | 0.702 |
+| **cut within bin** | **14.4%** | **14.8%** | **10.9%** | **14.5%** | **16.8%** | **16.8%** |
+
+The zero-shot row itself is not flat — residuals vary with vehicle age — so the fall of the absolute curve cannot all be credited to accumulating labels. Measuring the cut within each bin, the tenth label already buys 14.4% and the hundredth only 16.8%. The value of online calibration is **availability, not convergence**: it is a local estimator, and there is nothing left to learn after ten labels. This also explains the k_eff saturation in section 11 from the other end.
+
+**Label noise: unsolvable for training, solvable for evaluation.** 31,114 label blocks; 34.4% of sessions sit inside a block of length >1 (mean 1.24, max 7), 19.5% of sessions are copies.
+
+| Reference target | RMSE (Ah) | MAE (Ah) |
+|---|---|---|
+| Raw label | 0.8242 | 0.5592 |
+| Leave-one-out local median | **0.7487** | 0.5274 |
+
+**About 9% of the reported error is a labelling artefact, not model error.** The de-noised target's own gap to the label is σ = 0.573, independently matching the 0.547 measured directly in section 11. And weighting the training set by block changes nothing: 0.8245 → 0.8240 (per block) → 0.8238 (drop copies), i.e. −0.06% and −0.08%. That null is the informative part: copied labels hurt the *evaluation* and the ceiling of calibration, not the fit — squared loss targets a conditional mean E[y|x], and resampling changes weights, not the conditional distribution.
+
+**From Ah to a decision.** Car-level report: mean of the last 8 sessions plus a bias estimated only from labels *before* that window, truth = mean of the same 8 labels (187 cars, 42.54 Ah reference):
+
+| Scheme | RMSE (Ah) | RMSE (pp) | 90% width (Ah) | Coverage |
+|---|---|---|---|---|
+| Zero-shot | 0.7078 | 1.66 | 2.348 | 90.4% |
+| Static last 8 | 0.4815 | 1.13 | 1.704 | 88.8% |
+| **Online, half-life 5** | **0.4464** | **1.05** | **1.518** | 87.2% |
+
+Resolution — over 17,391 car pairs, how often the pair is ordered correctly, by the true SOH difference:
+
+| True difference | 0–0.5 pp | 0.5–1 pp | 1–2 pp | 2–4 pp | >4 pp |
+|---|---|---|---|---|---|
+| Ordering accuracy | 55.1% | 69.5% | 84.7% | 96.0% | 99.9% |
+
+So the resolution of this pipeline is about **2 pp**: a 1 pp difference is a coin-flip-plus, 2 pp is 96%. Screening the worst decile (19 cars, SOH ≤ 87.3%) with a 10% inspection budget: recall goes 57.9% → **73.7%**, and 47.4% → 78.9% at a 5% budget. Using the 90% lower bound as a conservative valuation costs only **1.64 pp** on average and is breached 8.6% of the time — usable in a pricing flow, whereas a point estimate is above the truth half the time.
+
+The car-level error distribution is not carried by the average: median **0.236 Ah (0.55 pp)**, p90 0.721 Ah, worst car 1.832 Ah. SOC span stays the dominant factor (0.580 / 0.320 / 0.395 Ah by tertile); the temperature split is **not monotone** (0.433 / 0.501 / 0.400) — both ends are harder, which is a U-shape rather than "hotter is worse".
+
+<p align="center">
+  <img src="docs/figures/online_calibration.png" width="740" alt="Streaming calibration: error cut versus labels accumulated, and the effect of label cadence">
+</p>
+
+<p align="center">
+  <img src="docs/figures/decision_limits.png" width="740" alt="Downstream value: ranking resolution, screening recall and car-level interval width">
+</p>
+
 ### Verdict
 
 | Direction | What was tried | Outcome |
@@ -575,6 +648,7 @@ Read it as a cost order: take the free lever first (8 charges, −33%), then dec
 | D5 Quality | rejection gate, robust feature subset, adversarial invariance | Gate works (13.8%); feature filtering fails; **invariance constraint works (−2.1%)** |
 | D6 Axis audit | 5 families × 4 feature sets, 6 tuning variants, same-car averaging, label noise measured directly | Non-linearity is worth 11.5%, the choice of family 3.2%, tuning 1.7%; the representation has no upside left; k=8 averaging takes the width from 2.53 to 1.62 Ah |
 | D7 Reporting unit | (k, m) grid of averaging × labelled sessions, six aggregators, bias-drift model, additivity check | The two levers are exactly additive (0.888 → 0.469 Ah, −47%); k saturates at 8 (k_eff 5.4); robust aggregators all fail; personalisation recovers 56% of bias because the rest drifts |
+| D8 Streaming calibration | Online sequential bias with forgetting, label cadence sweep, block-noise-aware evaluation, car-level decision metrics | Forgetting beats accumulating (0.821 → 0.687 Ah); forget per label, not per calendar; the cut saturates at 14–17% after the 10th label; block weighting in training does nothing; car level 0.446 Ah (1.05 pp), resolution ≈ 2 pp |
 
 ## Limitations
 
