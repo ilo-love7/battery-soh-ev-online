@@ -515,6 +515,108 @@ def fig_interval_floor() -> None:
     _save(fig, "interval_floor.png")
 
 
+def fig_aggregate_personalize() -> None:
+    """Averaging (free) and personalisation (needs labels): what each one buys."""
+    d = _load("aggregate_personalize.json")
+    ks = d["k_list"]
+    ms = d["m_list"]
+    M = np.array([[d["grid"][str(k)][str(m)]["rmse"] for m in ms] for k in ks])
+    base = M[0, 0]
+    G = (1.0 - M / base) * 100.0
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.4, 3.7),
+                             gridspec_kw={"width_ratios": [1.08, 1.0]})
+    im = axes[0].imshow(G, cmap="YlGnBu", aspect="auto", vmin=0.0)
+    for i in range(M.shape[0]):
+        for j in range(M.shape[1]):
+            axes[0].text(j, i, f"{M[i, j]:.3f}", ha="center", va="center", fontsize=7.6,
+                         color="white" if G[i, j] > G.max() * 0.58 else "#222222")
+    axes[0].set_xticks(range(len(ms)))
+    axes[0].set_xticklabels([f"m={m}" for m in ms], fontsize=8)
+    axes[0].set_yticks(range(len(ks)))
+    axes[0].set_yticklabels([f"k={k}" for k in ks], fontsize=8)
+    axes[0].set_xlabel("Labelled sessions m (personalisation, needs ground truth)")
+    axes[0].set_ylabel("Sessions averaged k (free)")
+    axes[0].set_title(f"RMSE (Ah), colour = gain over one snippet ({base:.3f} Ah)",
+                      fontsize=9.2, pad=8)
+    axes[0].grid(visible=False)
+    cb = fig.colorbar(im, ax=axes[0], fraction=0.038, pad=0.02)
+    cb.set_label("gain (%)", fontsize=7.6)
+    cb.ax.tick_params(labelsize=7)
+
+    colors = [C_GRAY, C_ACC, C_MAIN, C_PURPLE, C_RED, "#8c564b"]
+    for j, m in enumerate(ms):
+        w = [d["intervals"][str(k)][str(m)]["width"] for k in ks]
+        axes[1].plot(ks, w, marker="o", ms=3.6, lw=1.5, color=colors[j % len(colors)],
+                     label=f"m={m}")
+    w0 = d["intervals"][str(ks[0])]["0"]["width"]
+    w1 = d["intervals"]["8"]["8"]["width"]
+    axes[1].set_ylim(min(w0, w1) - 0.06, w0 + 0.10)
+    axes[1].annotate(f"{w0:.2f}", (ks[0], w0), textcoords="offset points", xytext=(7, -3),
+                     fontsize=7.6, color=C_GRAY)
+    axes[1].annotate(f"{w1:.2f}", (8, w1), textcoords="offset points", xytext=(-8, -15),
+                     fontsize=7.6, color="#8c564b")
+    axes[1].set_xscale("log")
+    axes[1].set_xticks(ks)
+    axes[1].set_xticklabels([str(k) for k in ks], fontsize=8)
+    axes[1].set_xlabel("Sessions averaged per car (k)")
+    axes[1].set_ylabel("90% interval width (Ah)")
+    axes[1].set_title("The interval shrinks with it, coverage unchanged",
+                      fontsize=9.5, pad=8)
+    axes[1].legend(fontsize=7.2, ncol=2, loc="upper right", framealpha=0.92)
+    fig.tight_layout()
+    _save(fig, "aggregate_personalize.png")
+
+
+def fig_budget_additivity() -> None:
+    """Does the three-part error budget predict the whole (k, m) grid?"""
+    d = _load("aggregate_personalize.json")
+    ks, ms = d["k_list"], d["m_list"]
+    xs, ys, cs = [], [], []
+    for k in ks:
+        for m in ms:
+            a = d["additivity"][str(k)][str(m)]
+            xs.append(a["predicted"])
+            ys.append(a["measured"])
+            cs.append(m)
+
+    fig, axes = plt.subplots(1, 2, figsize=(9.8, 3.7))
+    lim = [min(xs + ys) * 0.97, max(xs + ys) * 1.02]
+    axes[0].plot(lim, lim, ls="--", lw=1.0, color=C_GRAY, label="y = x")
+    sc = axes[0].scatter(xs, ys, c=cs, cmap="viridis", s=26, edgecolor="white", lw=0.5)
+    axes[0].set_xlim(lim)
+    axes[0].set_ylim(lim)
+    axes[0].set_xlabel(r"predicted $\sqrt{\sigma_b^2+\sigma_w^2/k}$  (Ah)")
+    axes[0].set_ylabel("measured RMSE (Ah)")
+    axes[0].set_title("(a) The budget predicts the shape, not the level", fontsize=9.5, pad=8)
+    cb = fig.colorbar(sc, ax=axes[0], fraction=0.038, pad=0.02)
+    cb.set_label("m", fontsize=7.6)
+    cb.ax.tick_params(labelsize=7)
+    axes[0].legend(fontsize=7.4, loc="upper left")
+    axes[0].text(0.97, 0.06, "every point sits above y = x: 1/sqrt(k) over-promises",
+                 transform=axes[0].transAxes, ha="right", fontsize=7.0, color=C_RED)
+
+    mm = [m for m in ms if m > 0]
+    rem = [d["bias_variance"][str(m)]["removed_pct"] for m in mm]
+    ceil = [d["bias_variance"][str(m)]["shrink_ceiling_pct"] for m in mm]
+    xi = np.arange(len(mm))
+    axes[1].bar(xi - 0.19, rem, width=0.36, color=C_MAIN, label="measured removal")
+    axes[1].bar(xi + 0.19, ceil, width=0.36, color=C_GRAY, alpha=0.75,
+                label="ceiling from the shrinkage")
+    for i, (a, b) in enumerate(zip(rem, ceil)):
+        axes[1].text(i - 0.19, a + 1.5, f"{a:.0f}%", ha="center", fontsize=7.2)
+        axes[1].text(i + 0.19, b + 1.5, f"{b:.0f}%", ha="center", fontsize=7.2, color="#555555")
+    axes[1].set_xticks(xi)
+    axes[1].set_xticklabels([f"m={m}" for m in mm], fontsize=8)
+    axes[1].set_ylabel("Car-bias variance removed (%)")
+    axes[1].set_ylim(0, 100)
+    axes[1].set_title("(b) Personalisation buys part of the bias, not all", fontsize=9.5, pad=8)
+    axes[1].legend(fontsize=7.4, loc="upper left", framealpha=0.92)
+    axes[1].grid(axis="x", visible=False)
+    fig.tight_layout()
+    _save(fig, "budget_additivity.png")
+
+
 def main() -> None:
     print("writing README figures ->", os.path.relpath(OUT, ROOT))
     fig_hero()
@@ -530,6 +632,8 @@ def main() -> None:
     fig_interval_frontier()
     fig_model_frontier()
     fig_interval_floor()
+    fig_aggregate_personalize()
+    fig_budget_additivity()
     print("done")
 
 

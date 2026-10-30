@@ -119,3 +119,32 @@ def pit_histogram(y_true: np.ndarray, lo: np.ndarray, med: np.ndarray, hi: np.nd
     hist, edges = np.histogram(u, bins=bins, range=(0, 1))
     hist = hist / max(hist.sum(), 1)
     return hist, edges
+
+
+def conformal_by_car(cars: np.ndarray, y: np.ndarray, pred: np.ndarray,
+                     nominal: float = 0.90, cal_frac: float = 0.25,
+                     n_splits: int = 5, seed: int = 42) -> Dict[str, float]:
+    """窗级 split-conformal：折内抽 ``cal_frac`` 的车做校准，其余车直接以预测为中心。
+
+    与脚本 13 / 18 / 20 里用的是同一套配方（``method="higher"`` 的分位），
+    差别只在抽出来的窗口是"同车 k 段聚合"还是"单个片段"。抽出成公共函数是为了
+    让聚合 × 个性化的网格不必再复制一份。
+    """
+    cars = np.asarray(cars)
+    y = np.asarray(y, dtype=float)
+    pred = np.asarray(pred, dtype=float)
+    lo = np.full(y.shape, np.nan)
+    hi = np.full(y.shape, np.nan)
+    for fi, (tr, te) in enumerate(group_kfold_by_car(cars, n_splits=n_splits, seed=seed)):
+        tr_cars = np.unique(cars[tr])
+        rng = np.random.default_rng(1000 + fi)
+        n_cal = max(1, int(round(len(tr_cars) * cal_frac)))
+        cal_cars = set(rng.choice(tr_cars, size=n_cal, replace=False).tolist())
+        is_cal = np.array([c in cal_cars for c in cars[tr]])
+        cal = tr[is_cal]
+        q = float(np.quantile(np.abs(pred[cal] - y[cal]), nominal, method="higher"))
+        lo[te], hi[te] = pred[te] - q, pred[te] + q
+    m = interval_metrics(y, lo, hi)
+    return {"width": float(m["width_mean"]), "coverage": m["coverage"],
+            "below": m["below_rate"], "above": m["above_rate"],
+            "q": float(np.nanmean((hi - lo) / 2.0))}

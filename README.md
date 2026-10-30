@@ -510,6 +510,60 @@ That single table explains all three behaviours: averaging works because 31% of 
   <img src="docs/figures/interval_floor.png" width="740" alt="RMSE and 90% interval width versus the number of sessions averaged per car">
 </p>
 
+### 11. Averaging and personalisation are not alternatives — they are a sequence
+
+Section 10 split the error into three blocks and named a lever for each: car bias → personalisation, within-car model error → same-car averaging, label noise → no lever. The first two attack blocks that do not overlap, but they had never been measured together (section 4 personalised a *single* snippet, section 10 did *no* correction at all). This section lays them out on one grid.
+
+Protocol (deliberately stricter than section 10, so absolute numbers differ): each car is cut by odometer at the median — the first half is a **calibration pool**, the second half the **evaluation set**. The bias comes only from the *most recent* m labelled sessions of the pool (the labels a deployment actually has), shrinkage λ=5 as before. 187 cars with ≥24 sessions survive; the window cap stays at 12 per car per k.
+
+**RMSE (Ah), zero-shot snippet baseline 0.888:**
+
+| k \ m | 0 | 1 | 2 | 3 | 5 | 8 |
+|---|---|---|---|---|---|---|
+| 1 | 0.888 | 0.854 | 0.840 | 0.831 | 0.820 | 0.806 |
+| 2 | 0.866 | 0.832 | 0.819 | 0.808 | 0.802 | 0.787 |
+| 3 | 0.737 | 0.697 | 0.681 | 0.668 | 0.655 | 0.638 |
+| 5 | 0.608 | 0.563 | 0.548 | 0.536 | 0.525 | 0.505 |
+| 8 | 0.591 | 0.542 | **0.522** | 0.507 | 0.492 | **0.469** |
+| 12 | 0.595 | 0.546 | 0.527 | 0.512 | 0.500 | 0.478 |
+
+The 90% width falls 2.55 → 1.42 Ah over the same grid with coverage between 88.1% and 90.6% — no cell buys width by giving up calibration.
+
+**The two levers are exactly additive.** Averaging (k=1→8 at m=0) is −33.4%, personalisation (m=0→8 at k=8) is −20.7%, product prediction 0.888 × 0.665 × 0.793 = 0.4691 against a measured **0.4688** — 0.06% apart. That is what two non-overlapping variance blocks should look like.
+
+**But k must be replaced by k_eff.** The budget `√(σ_b² + σ_w²/k)` reproduces the k=1 column to within 0.1% and then sits *above* the measured points everywhere (20–28% high at k=2, 12–18% at k=3). Back-solving the m=0 row gives k_eff = 1.00, 1.08, 1.84, 4.49, 5.44, 5.20 for k = 1…12: **two adjacent sessions are worth 1.08 sessions**, and k saturates at 8, so k=12 buys nothing (+0.7%). This is the same fact as the 19.8% copied labels seen from the other side.
+
+**No aggregator beats the arithmetic mean.** Median (+3.1% at k=3), 20% trimmed mean (0.0%), recency weighting (+1.4%), quality weighting (+0.1%), SOC-span weighting (+0.8%) — all at best neutral. Robust statistics assume a few independent outliers; here the contamination is **36–38% of labels copied in blocks**, far beyond any trimming fraction, and copied labels are perfectly correlated rather than independent. *Under block-correlated label noise, robust aggregation fails* — that is the transferable lesson.
+
+**Personalisation only buys 56% of the bias, because bias drifts:**
+
+| m | 1 | 2 | 3 | 5 | 8 |
+|---|---|---|---|---|---|
+| measured bias variance removed | 24% | 33% | 39% | 46% | **56%** |
+| ceiling implied by the shrinkage | 31% | 49% | 61% | 75% | 85% |
+
+The gap is not estimation noise, it is drift: estimating each car's bias separately on the two halves gives ρ = 0.688 and slope 0.850 (<1, regression to the mean), and the difference accounts for 41.3% of the one-sided variance — **only about 60% of car bias transfers across time**. So "car bias is a hard floor" needs a qualifier: true for zero-shot, and 8 labels recover 56% of it; the remaining 40% is drift that no λ can reach.
+
+**Deployment trade-off (SOH at a 42.6 Ah reference):**
+
+| Plan | Cost | RMSE (Ah) | 90% width (Ah) | SOH RMSE |
+|---|---|---|---|---|
+| One snippet, zero-shot | 1 charge | 0.888 | 2.55 | 2.08 pp |
+| Average 8, zero-shot | 8 charges | 0.591 | 1.75 | 1.39 pp |
+| Average 8 + 2 labelled | 8 + 2 | 0.522 | 1.52 | 1.22 pp |
+| Average 8 + 8 labelled | 8 + 8 | **0.469** | **1.42** | **1.10 pp** |
+| Average 12 + 8 labelled | 12 + 8 | 0.478 | 1.38 | 1.12 pp |
+
+Read it as a cost order: take the free lever first (8 charges, −33%), then decide whether to pay for labels. On top of k=8 the first label is worth −8.3%, the second −3.7%, and every one after that about −1.5% — **one or two labelled sessions is the best-value purchase in the whole table**.
+
+<p align="center">
+  <img src="docs/figures/aggregate_personalize.png" width="740" alt="RMSE and 90% interval width over the aggregation x personalisation grid">
+</p>
+
+<p align="center">
+  <img src="docs/figures/budget_additivity.png" width="740" alt="Measured versus predicted RMSE from the error budget, and bias variance removed by personalisation">
+</p>
+
 ### Verdict
 
 | Direction | What was tried | Outcome |
@@ -520,6 +574,7 @@ That single table explains all three behaviours: averaging works because 31% of 
 | D4 Cold start | bias / affine / ridge / active selection | One bias term only; active selection doubles the gain |
 | D5 Quality | rejection gate, robust feature subset, adversarial invariance | Gate works (13.8%); feature filtering fails; **invariance constraint works (−2.1%)** |
 | D6 Axis audit | 5 families × 4 feature sets, 6 tuning variants, same-car averaging, label noise measured directly | Non-linearity is worth 11.5%, the choice of family 3.2%, tuning 1.7%; the representation has no upside left; k=8 averaging takes the width from 2.53 to 1.62 Ah |
+| D7 Reporting unit | (k, m) grid of averaging × labelled sessions, six aggregators, bias-drift model, additivity check | The two levers are exactly additive (0.888 → 0.469 Ah, −47%); k saturates at 8 (k_eff 5.4); robust aggregators all fail; personalisation recovers 56% of bias because the rest drifts |
 
 ## Limitations
 
