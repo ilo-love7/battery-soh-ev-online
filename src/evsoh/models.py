@@ -44,10 +44,11 @@ def build_model(name: str, cfg: Dict[str, Any] | None = None, **overrides):
         from xgboost import XGBRegressor
 
         p = {**cfg.get("xgb", {}), **kw}
+        n_jobs = p.pop("n_jobs", -1)      # 允许调用方限制线程数（LOVO 并行时需要）
         return Pipeline([
             ("imp", SimpleImputer(strategy="median")),
             ("m", XGBRegressor(
-                objective="reg:squarederror", tree_method="hist", n_jobs=-1,
+                objective="reg:squarederror", tree_method="hist", n_jobs=n_jobs,
                 random_state=42, verbosity=0, **p)),
         ])
 

@@ -111,8 +111,7 @@ def fig_ablation() -> None:
     for b, v, k in zip(bars, vals, [k for k, _ in order]):
         ax.text(v + max(vals) * 0.015, b.get_y() + b.get_height() / 2,
                 f"{v:.3f}  ({ab[k]['n_features']} feats)", va="center", fontsize=8.5)
-    ax.grid(axis="y", visible=False)
-    ax.set_axisbelow(True)
+    ax.grid(visible=False)
     _save(fig, "ablation.png")
 
 
@@ -207,6 +206,125 @@ def fig_error_vs_span() -> None:
     _save(fig, "error_vs_span.png")
 
 
+# ---------------------------------------------------------------- 6. LOVO + decomposition
+def fig_lovo() -> None:
+    """严格留一车：逐车误差分布 + 误差由什么解释。"""
+    d = _load("lovo_decomposition.json")
+    pred = pd.read_parquet(os.path.join(ROOT, "results", "cache", "lovo_predictions.parquet"),
+                           columns=["car", "capacity", "pred_lovo"])
+    pred["sq"] = (pred["pred_lovo"] - pred["capacity"]) ** 2
+    per = pred.groupby("car")["sq"].mean().pow(0.5)
+
+    fig, axes = plt.subplots(1, 2, figsize=(9.4, 3.5),
+                             gridspec_kw={"width_ratios": [1.2, 1]})
+    ax = axes[0]
+    ax.hist(per, bins=28, color=C_MAIN, alpha=0.85, edgecolor="white")
+    ax.axvline(per.median(), color=C_RED, ls="--", lw=1.4,
+               label=f"median {per.median():.2f} Ah")
+    ax.axvline(per.max(), color=C_ACC, ls=":", lw=1.4, label=f"worst {per.max():.2f} Ah")
+    ax.set_xlabel("Per-car RMSE (Ah), leave-one-car-out")
+    ax.set_ylabel("Number of cars")
+    ax.set_title(f"191 folds: a long tail of hard cars", pad=8)
+    ax.legend(loc="upper right")
+
+    ax = axes[1]
+    dc = d["decomposition"]
+    blocks = [("Snippet\nattributes", dc["r2_attr"], C_MAIN),
+              ("Car\nidentity", dc["r2_car"], C_ACC),
+              ("Both", dc["r2_both"], C_PURPLE)]
+    xs = np.arange(len(blocks))
+    bars = ax.bar(xs, [b[1] * 100 for b in blocks], color=[b[2] for b in blocks], width=0.55)
+    ax.set_xticks(xs)
+    ax.set_xticklabels([b[0] for b in blocks], fontsize=8.5)
+    ax.set_ylabel("Variance of per-car RMSE (%)")
+    ax.set_ylim(0, 100)
+    ax.set_title("What drives cross-car error", pad=8)
+    for b, (_l, v, _c) in zip(bars, blocks):
+        ax.text(b.get_x() + b.get_width() / 2, v * 100 + 2, f"{v * 100:.0f}%",
+                ha="center", fontsize=9)
+    ax.grid(axis="x", visible=False)
+    ax.set_axisbelow(True)
+    _save(fig, "lovo_decomposition.png")
+
+
+# ---------------------------------------------------------------- 7. CQR coverage
+def fig_cqr() -> None:
+    """条件覆盖：整体都是 90%，分箱后差别才出来。"""
+    d = _load("cqr.json")["methods"]
+    keys = [("CVplus", "CV+", C_ACC), ("NC", "Normalized conformal", C_GRAY),
+            ("CQR", "CQR", C_MAIN)]
+    span_order = ["(20, 30]", "(30, 40]", "(40, 50]", "(50, 60]", "(60, 70]", "(70, 100]"]
+    labels = [s.strip("()[]").replace(", ", "–").replace("100", "100") for s in span_order]
+
+    fig, ax = plt.subplots(figsize=(6.4, 3.4))
+    for key, label, col in keys:
+        by = d[key]["by_span"]["bins"]
+        ys = [by[s]["coverage"] * 100 for s in span_order]
+        ax.plot(range(len(ys)), ys, marker="o", ms=5, lw=1.7, color=col, label=label)
+    ax.axhline(90, color=C_RED, ls="--", lw=1.2, label="nominal 90%")
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels, fontsize=8.5)
+    ax.set_xlabel("SOC span of the snippet (%)")
+    ax.set_ylabel("Empirical coverage (%)")
+    ax.set_title("Overall coverage is identical; conditional coverage is not", pad=8)
+    ax.set_ylim(70, 96)
+    ax.legend(loc="lower right", fontsize=8.5)
+    _save(fig, "cqr_coverage.png")
+
+
+# ---------------------------------------------------------------- 8. personalization
+def fig_personalize() -> None:
+    """个性化：参数越少越稳，选样比校正形式更重要。"""
+    pers = _load("personalize_v2.json")["curves"]
+    gate = _load("quality_gate.json")["rows"]
+
+    fig, axes = plt.subplots(1, 2, figsize=(9.4, 3.5))
+    styles = [("chrono_affine", "affine a·p+b", C_ACC, "s"),
+              ("chrono_ridge", "per-car ridge head", C_PURPLE, "^"),
+              ("chrono_bias", "bias only", C_GRAY, "o"),
+              ("chrono_active", "bias + pick best k", C_MAIN, "D")]
+    lo, hi = -12.0, 12.0
+    for key, label, col, mk in styles:
+        c = pers[key]
+        base = c[0]["car_mae_mean"]
+        ks = np.array([r["k"] for r in c], dtype=float)
+        ys = np.array([(base - r["car_mae_mean"]) / base * 100 for r in c])
+        vis = ys >= lo
+        axes[0].plot(ks[vis], ys[vis], marker=mk, ms=4.5, lw=1.6, color=col, label=label)
+        if (~vis).any():
+            axes[0].plot(ks[~vis][:1], [lo + 0.7], marker=mk, ms=4.5, color=col,
+                         ls="none", mfc="white")
+        axes[0].annotate(f"{ys[-1]:+.1f}%", (ks[-1], ys[-1]), textcoords="offset points",
+                         xytext=(6, 0), fontsize=8, color=col, va="center")
+    axes[0].axhline(0, color=C_GRAY, ls="--", lw=1)
+    axes[0].set_ylim(lo, hi)
+    axes[0].set_xlim(-0.8, 23.5)
+    axes[0].set_xlabel("Labelled sessions used per car (k)")
+    axes[0].set_ylabel("MAE reduction vs zero-shot (%)")
+    axes[0].set_title("(a) More parameters need more data", pad=8)
+    axes[0].legend(loc="upper left", fontsize=7.6, ncol=2, columnspacing=1.0,
+                   handlelength=1.6, borderpad=0.4)
+    axes[0].text(0.98, 0.04, "affine / ridge reach −45% / −47% at k=1 (off-scale)",
+                 transform=axes[0].transAxes, fontsize=7.2, color=C_GRAY,
+                 style="italic", ha="right")
+
+    xs = [r["retained_frac"] * 100 for r in gate]
+    ys = [r["mae"] for r in gate]
+    axes[1].plot(xs, ys, marker="o", ms=5, lw=1.7, color=C_MAIN)
+    for i, (x, y_, r) in enumerate(zip(xs, ys, gate)):
+        if i in (1, 2):
+            continue
+        txt = "no gate" if r["threshold"] == 0.0 else f"≥{r['threshold']:.2f}"
+        axes[1].annotate(txt, (x, y_), textcoords="offset points", xytext=(-4, 9),
+                         ha="center", fontsize=8, color=C_GRAY)
+    axes[1].set_xlabel("Sessions retained (%)")
+    axes[1].set_ylabel("MAE (Ah)")
+    axes[1].set_title("(b) Rejecting low-quality snippets", pad=8)
+    axes[1].set_ylim(min(ys) - 0.012, max(ys) + 0.018)
+    axes[1].invert_xaxis()
+    _save(fig, "personalization.png")
+
+
 def main() -> None:
     print("writing README figures ->", os.path.relpath(OUT, ROOT))
     fig_hero()
@@ -214,6 +332,9 @@ def main() -> None:
     fig_interval()
     fig_coldstart()
     fig_error_vs_span()
+    fig_lovo()
+    fig_cqr()
+    fig_personalize()
     print("done")
 
 
