@@ -415,6 +415,106 @@ def fig_interval_frontier() -> None:
     _save(fig, "interval_frontier.png")
 
 
+def fig_model_frontier() -> None:
+    """Model family x feature set: which axis actually moves the error."""
+    d = _load("model_frontier.json")
+    fams = d["families"]
+    sets = ["full", "no_coulomb", "coulomb_only", "no_context"]
+    set_lab = ["full 114", "no Coulomb", "Coulomb only", "no context"]
+    fam_lab = ["ElasticNet", "Random forest", "HistGB", "XGBoost", "MLP"]
+    base = d["grid"]["full"]["xgb"]["rmse"]
+    M = np.array([[d["grid"][fs][f]["rmse"] for fs in sets] for f in fams])
+    D = (M / base - 1.0) * 100.0
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.4, 3.7),
+                             gridspec_kw={"width_ratios": [1.25, 1.0]})
+    # The linear model's "no Coulomb" cell is +82.5% and would wash out the
+    # informative -5..+20 band, so the colour scale is clipped and the printed
+    # number still carries the true value.
+    vmax = 25.0
+    im = axes[0].imshow(D, cmap="RdBu_r", vmin=-vmax, vmax=vmax, aspect="auto")
+    for i in range(M.shape[0]):
+        for j in range(M.shape[1]):
+            col = "white" if abs(D[i, j]) > vmax * 0.55 else "#222222"
+            axes[0].text(j, i, f"{M[i, j]:.3f}\n{D[i, j]:+.1f}%", ha="center",
+                         va="center", fontsize=7.6, color=col)
+    axes[0].set_xticks(range(len(sets)))
+    axes[0].set_xticklabels(set_lab, fontsize=7.8)
+    axes[0].set_yticks(range(len(fams)))
+    axes[0].set_yticklabels(fam_lab, fontsize=7.8)
+    axes[0].grid(visible=False)
+    axes[0].add_patch(plt.Rectangle((-0.5, fams.index("xgb") - 0.5), 1, 1,
+                                    fill=False, ec=C_MAIN, lw=2.0))
+    axes[0].set_title("RMSE (Ah) / change vs. main model", fontsize=9.5, pad=8)
+    cb = fig.colorbar(im, ax=axes[0], fraction=0.038, pad=0.02)
+    cb.set_label("delta (%), clipped at ±25", fontsize=7.6)
+    cb.ax.tick_params(labelsize=7)
+
+    ax_r = d["axes"]
+    items = [("Model family\n(full features)", ax_r["model_axis_full"]["range_pct"], C_MAIN),
+             ("Feature set\n(XGBoost, loss only)", ax_r["feature_axis_xgb"]["range_pct"], C_ACC),
+             ("XGB tuning", ax_r["tuning_axis"]["xgb"]["range_pct"], C_PURPLE),
+             ("MLP tuning", ax_r["tuning_axis"]["mlp"]["range_pct"], C_PURPLE),
+             ("HistGB tuning", ax_r["tuning_axis"]["hgb"]["range_pct"], C_PURPLE)]
+    bars = axes[1].barh(range(len(items)), [v for _l, v, _c in items],
+                        color=[c for _l, _v, c in items], height=0.58)
+    axes[1].set_yticks(range(len(items)))
+    axes[1].set_yticklabels([l for l, _v, _c in items], fontsize=7.8)
+    axes[1].invert_yaxis()
+    for b, (_l, v, _c) in zip(bars, items):
+        axes[1].text(v + 0.4, b.get_y() + b.get_height() / 2, f"{v:.1f}%",
+                     va="center", fontsize=7.8)
+    axes[1].set_xlabel("Worst-to-best RMSE spread (%)")
+    axes[1].set_title("Which axis is worth the effort?", fontsize=9.5, pad=8)
+    axes[1].set_xlim(0, max(v for _l, v, _c in items) * 1.22)
+    axes[1].grid(axis="y", visible=False)
+    fig.tight_layout()
+    _save(fig, "model_frontier.png")
+
+
+def fig_interval_floor() -> None:
+    """Averaging sessions per car: how far the error and the interval can shrink."""
+    d = _load("interval_floor.json")
+    ks = [int(k) for k in d["aggregate"]]
+    rmse = [d["aggregate"][str(k)]["rmse"] for k in ks]
+    width = [d["aggregate"][str(k)]["width"] for k in ks]
+    theo = [d["variance"]["pred_rmse_k"][str(k)] for k in ks]
+    flat = d["variance"]["sigma_between"]
+
+    fig, axes = plt.subplots(1, 2, figsize=(9.8, 3.6))
+    axes[0].plot(ks, rmse, marker="o", ms=5, lw=1.8, color=C_MAIN, label="measured")
+    axes[0].plot(ks, theo, ls="--", lw=1.3, color=C_GRAY, label=r"$\sqrt{\sigma_b^2+\sigma_w^2/k}$")
+    axes[0].axhline(flat, color=C_RED, ls=":", lw=1.2,
+                    label=f"car-bias floor {flat:.2f} Ah")
+    axes[0].set_xscale("log")
+    axes[0].set_xticks(ks)
+    axes[0].set_xticklabels([str(k) for k in ks])
+    axes[0].set_xlabel("Sessions averaged per car (k)")
+    axes[0].set_ylabel("RMSE (Ah)")
+    axes[0].set_title("(a) Averaging beats tuning", fontsize=9.5, pad=8)
+    axes[0].legend(fontsize=7.6, loc="upper right")
+    axes[0].annotate(f"{rmse[0]:.2f}", (ks[0], rmse[0]), textcoords="offset points",
+                     xytext=(6, 6), fontsize=7.8)
+    axes[0].annotate(f"{rmse[-1]:.2f}", (ks[-1], rmse[-1]), textcoords="offset points",
+                     xytext=(-4, 8), fontsize=7.8)
+
+    axes[1].plot(ks, width, marker="s", ms=5, lw=1.8, color=C_ACC)
+    axes[1].set_xscale("log")
+    axes[1].set_xticks(ks)
+    axes[1].set_xticklabels([str(k) for k in ks])
+    axes[1].set_xlabel("Sessions averaged per car (k)")
+    axes[1].set_ylabel("90% interval width (Ah)")
+    axes[1].set_title("(b) The interval shrinks too (coverage stays 88-89%)",
+                      fontsize=9.5, pad=8)
+    for k, v in zip(ks, width):
+        if k in (ks[0], 8):
+            axes[1].annotate(f"{v:.2f}", (k, v), textcoords="offset points",
+                             xytext=(0, 9), ha="center", fontsize=7.8, color=C_ACC)
+    axes[1].set_ylim(min(width) * 0.85, max(width) * 1.12)
+    fig.tight_layout()
+    _save(fig, "interval_floor.png")
+
+
 def main() -> None:
     print("writing README figures ->", os.path.relpath(OUT, ROOT))
     fig_hero()
@@ -428,6 +528,8 @@ def main() -> None:
     fig_condition_norm()
     fig_sequence()
     fig_interval_frontier()
+    fig_model_frontier()
+    fig_interval_floor()
     print("done")
 
 
