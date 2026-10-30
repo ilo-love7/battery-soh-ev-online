@@ -325,6 +325,96 @@ def fig_personalize() -> None:
     _save(fig, "personalization.png")
 
 
+# ---------------------------------------------------------------- 9. condition norm
+def fig_condition_norm() -> None:
+    """工况不变性：同架构下开/关 GRL，收益集中在最冷的箱。"""
+    d = _load("condition_norm.json")["methods"]
+    bins = d["baseline"]["by_temp"]["bins"]
+    order = [b for b in ["<10", "10-18", "18-24", "24-30", "30-36", ">36"] if b in bins]
+    series = [("baseline", "XGBoost", C_GRAY), ("mlp_plain", "MLP, no GRL", C_ACC),
+              ("target_invar", "MLP + GRL", C_MAIN)]
+
+    fig, ax = plt.subplots(figsize=(6.6, 3.5))
+    w = 0.26
+    xs = np.arange(len(order))
+    for k, (key, label, col) in enumerate(series):
+        vals = [d[key]["by_temp"]["bins"][b]["mae"] for b in order]
+        ax.bar(xs + (k - 1) * w, vals, width=w, color=col, label=label)
+    ax.set_xticks(xs)
+    ax.set_xticklabels([f"{b}°C" for b in order], fontsize=8.5)
+    ax.set_xlabel("Mean temperature of the snippet")
+    ax.set_ylabel("MAE (Ah)")
+    ax.set_title("Temperature invariance is bought in the representation,\n"
+                 "and it pays off where it matters most", pad=8, fontsize=9.5)
+    ax.set_ylim(0, max(d["baseline"]["by_temp"]["bins"][b]["mae"] for b in order) * 1.35)
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.95, ncol=2)
+    ax.grid(axis="x", visible=False)
+    ax.set_axisbelow(True)
+    _save(fig, "condition_norm.png")
+
+
+# ---------------------------------------------------------------- 10. sequence vs manual
+def fig_sequence() -> None:
+    """表示 vs 模型：原始曲线喂 CNN 明显更差。"""
+    d = _load("sequence_vs_manual.json")["methods"]
+    order = [("xgb_manual", "XGBoost\n+ manual feats", C_GRAY),
+             ("mlp_manual", "MLP\n+ manual feats", C_ACC),
+             ("seq_cnn", "1D CNN\n+ raw curves", C_MAIN)]
+    base = d["xgb_manual"]["rmse"]
+
+    fig, ax = plt.subplots(figsize=(6.2, 3.3))
+    ys = np.arange(len(order))
+    vals = [d[k]["rmse"] for k, _l, _c in order]
+    cols = [c for _k, _l, c in order]
+    ax.hlines(ys, base, vals, color=cols, lw=2.4, alpha=0.75)
+    for i, (v, c) in enumerate(zip(vals, cols)):
+        ax.plot([v], [i], marker="o", ms=8, color=c, zorder=3)
+        d_ = "" if i == 0 else f"  ({(v / base - 1) * 100:+.1f}%)"
+        ax.text(v, i + 0.36, f"{v:.4f}{d_}", ha="center", va="top", fontsize=8.4, color=c)
+    ax.axvline(base, color=C_GRAY, ls="--", lw=1.1, zorder=1)
+    ax.set_yticks(ys)
+    ax.set_yticklabels([l for _k, l, _c in order], fontsize=8.4)
+    ax.invert_yaxis()
+    ax.set_ylim(len(order) - 0.30, -0.45)
+    ax.set_xlim(base - 0.07, max(vals) + 0.08)
+    ax.set_xlabel("RMSE (Ah), 5-fold by car on 11,966 sessions")
+    ax.set_title("Raw curves do not beat hand-crafted features", pad=8)
+    ax.grid(visible=False)
+    _save(fig, "sequence_vs_manual.png")
+
+
+# ---------------------------------------------------------------- 11. interval frontier
+def fig_interval_frontier() -> None:
+    """宽度-覆盖率前沿：CQR 落在噪声下限上。"""
+    d = _load("ensemble_intervals.json")
+    m = d["methods"]
+    diag = d["diagnostics"]
+    meta = [("quantile", "Quantile regression", C_GRAY, "o", (8, 5), "left"),
+            ("cqr", "CQR", C_MAIN, "D", (0, -15), "center"),
+            ("ens", "Deep ensemble (7)", C_ACC, "s", (8, 5), "left"),
+            ("ens_cal", "Ensemble + conformal", C_PURPLE, "^", (-2, 9), "center")]
+
+    fig, ax = plt.subplots(figsize=(6.4, 3.8))
+    for key, label, col, mk, off, ha in meta:
+        x, yv = m[key]["width_mean"], m[key]["coverage"] * 100
+        ax.scatter([x], [yv], s=70, color=col, marker=mk, zorder=3, label=label)
+        ax.annotate(f"{yv:.1f}%", (x, yv), textcoords="offset points", xytext=off,
+                    fontsize=8.2, color=col, ha=ha)
+    floor = 2.0 * diag["abs_residual_p90"]
+    ax.axvline(floor, color=C_RED, ls=":", lw=1.3)
+    ax.text(floor - 0.05, 30, f"noise floor\n2×P90(|r|) = {floor:.2f} Ah",
+            fontsize=7.6, color=C_RED, va="bottom", ha="right")
+    ax.axhline(90, color=C_RED, ls="--", lw=1.1)
+    ax.set_xlabel("Mean interval width (Ah)")
+    ax.set_ylabel("Empirical coverage (%)")
+    ax.set_xlim(0.0, 2.95)
+    ax.set_ylim(15, 98)
+    ax.set_title("CQR sits on the noise floor: wider is the only way to cover more",
+                 pad=8, fontsize=9.5)
+    ax.legend(loc="center right", fontsize=8, framealpha=0.92)
+    _save(fig, "interval_frontier.png")
+
+
 def main() -> None:
     print("writing README figures ->", os.path.relpath(OUT, ROOT))
     fig_hero()
@@ -335,6 +425,9 @@ def main() -> None:
     fig_lovo()
     fig_cqr()
     fig_personalize()
+    fig_condition_norm()
+    fig_sequence()
+    fig_interval_frontier()
     print("done")
 
 
