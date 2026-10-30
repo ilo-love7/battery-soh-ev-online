@@ -154,3 +154,70 @@ def temperature_bins(t: np.ndarray, n: int = 3) -> Tuple[np.ndarray, List[float]
     edges = np.quantile(t, np.linspace(0, 1, n + 1)[1:-1])
     lab = np.digitize(t, edges)
     return lab, [float(e) for e in edges]
+
+
+# ---------------------------------------------------------------- 收缩（partial pooling）
+def tau2_moments(b_hat: np.ndarray, se: np.ndarray, inflate: float = 1.0) -> Dict[str, float]:
+    """斜率异质性的矩估计：``τ² = var(b_hat) − 平均抽样方差``。
+
+    ``b_hat`` 是每辆车单独估的斜率，``se`` 是它的标准误。观测到的离散度里
+    有一部分只是抽样噪声（``se²``），扣掉之后的 ``τ²`` 才是"车与车真的不一样"。
+    结果截断在 0：若 ``var(b_hat) < 噪声``，说明根本没有可识别的异质性，
+    收缩权重应当全部给全局值。
+
+    ``inflate`` 用来吸收残差自相关造成的方差低估（用 ``(1+ρ)/(1−ρ)`` 近似）。
+    """
+    b = np.asarray(b_hat, dtype=float)
+    s = np.asarray(se, dtype=float) * np.sqrt(float(inflate))
+    ok = np.isfinite(b) & np.isfinite(s)
+    b, s = b[ok], s[ok]
+    if b.size < 3:
+        raise ValueError("tau2_moments: 有效车数不足")
+    var_b = float(np.var(b, ddof=1))
+    noise = float(np.mean(s ** 2))
+    tau2 = max(0.0, var_b - noise)
+    return {"tau2": tau2, "tau": float(np.sqrt(tau2)), "var_b": var_b,
+            "noise_var": noise, "share_signal": float(tau2 / var_b) if var_b > 0 else 0.0,
+            "share_noise": float(noise / var_b) if var_b > 0 else 1.0,
+            "n": int(b.size), "inflate": float(inflate)}
+
+
+def shrink_slopes(b_hat: np.ndarray, se: np.ndarray, global_b: float,
+                  tau2: float | None = None, lam: float | None = None) -> Dict[str, np.ndarray]:
+    """把每辆车的斜率往全局值收缩：``b_c = λ_c·b_hat_c + (1−λ_c)·b_global``。
+
+    给了 ``tau2`` 就走经验贝叶斯权重 ``λ_c = τ² / (τ² + se_c²)``——
+    估得越准的车（se 小）越保留自己的斜率，估得糊的车自动退回全局值。
+    给了 ``lam`` 就用固定权重（用于画 λ 曲线做敏感性分析）。
+    """
+    b = np.asarray(b_hat, dtype=float)
+    s = np.asarray(se, dtype=float)
+    if lam is not None:
+        w = np.full_like(b, float(lam))
+    else:
+        if tau2 is None:
+            raise ValueError("shrink_slopes: 需要 tau2 或 lam")
+        w = tau2 / (tau2 + s ** 2)
+    return {"slope": global_b + w * (b - global_b), "weight": w}
+
+
+def trend_resid_sd(df: pd.DataFrame, y: str, order: str = "mileage",
+                   shift: np.ndarray | None = None, group: str = "car") -> float:
+    """先减掉折算量 ``shift``，再车内去均值并对 ``order`` 去趋势，返回残差标准差。
+
+    这是本轮统一的"折算好不好"的度量：折算若正确，剩下的就只是老化趋势 + 噪声，
+    残差越小说明温度项被吃得越干净。用共同斜率 + 车内截距（等价于
+    车固定效应回归 ``y ~ order``），与 ``fe_ols`` 的口径一致。
+    """
+    sub = df[[group, y, order]].copy()
+    z = sub[y].to_numpy(dtype=float)
+    if shift is not None:
+        z = z - np.asarray(shift, dtype=float)
+    x = sub[order].to_numpy(dtype=float)
+    g = sub[group].to_numpy()
+    zc = z - pd.Series(z).groupby(g).transform("mean").to_numpy()
+    xc = x - pd.Series(x).groupby(g).transform("mean").to_numpy()
+    denom = float(xc @ xc)
+    beta = float(xc @ zc) / denom if denom > 0 else 0.0
+    resid = zc - beta * xc
+    return float(np.std(resid, ddof=1))

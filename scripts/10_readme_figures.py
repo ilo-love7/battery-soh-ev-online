@@ -813,6 +813,71 @@ def fig_reference_temperature() -> None:
     print("wrote", out)
 
 
+def fig_debias_identifiability() -> None:
+    """A per-car slope looks precise, but the two halves of one car's history disagree."""
+    d = _load("debias_transfer.json")
+    A = d["A"]
+    cars = pd.read_parquet(os.path.join(MET, "debias_transfer_cars.parquet"))
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.0, 3.7))
+    axes[0].scatter(cars["b1"], cars["b2"], s=12, color=C_ACC, alpha=0.72,
+                    edgecolor="none")
+    lim = [min(cars["b1"].min(), cars["b2"].min()) - 0.02,
+           max(cars["b1"].max(), cars["b2"].max()) + 0.02]
+    axes[0].plot(lim, lim, color=C_GRAY, lw=1.0, ls=":")
+    axes[0].axhline(0, color=C_GRAY, lw=0.7, ls=":")
+    axes[0].axvline(0, color=C_GRAY, lw=0.7, ls=":")
+    axes[0].set_xlim(lim)
+    axes[0].set_ylim(lim)
+    axes[0].set_xlabel("Slope from the first 60% of the history (Ah/°C)")
+    axes[0].set_ylabel("Slope from the last 40% (Ah/°C)")
+    axes[0].set_title(f"Two halves of one car disagree: ρ={A['stability']['corr_half']:.2f}, "
+                      f"rms gap {A['stability']['rms_diff']:.3f}", fontsize=9.0, pad=8)
+
+    lam = [r["lam"] for r in A["lam_curve"]]
+    sd = [r["median_sd"] for r in A["lam_curve"]]
+    axes[1].plot(lam, sd, "-o", ms=4, lw=1.6, color=C_MAIN, label="λ·own + (1−λ)·global")
+    axes[1].axhline(A["none_sd_median"], color=C_GRAY, lw=1.0, ls=":",
+                    label=f"no debiasing ({A['none_sd_median']:.3f})")
+    axes[1].axhline(A["oracle_sd_median"], color="#2e8b57", lw=1.3, ls="--",
+                    label=f"oracle slope ({A['oracle_sd_median']:.3f})")
+    axes[1].set_xlabel("Weight on the car's own slope, λ")
+    axes[1].set_ylabel("Median held-out residual SD (Ah)")
+    axes[1].set_title(f"Own slope wins on only "
+                      f"{A['share_own_better_than_global']*100:.0f}% of cars", fontsize=9.2, pad=8)
+    axes[1].legend(fontsize=7.2, loc="upper right", framealpha=0.92)
+    _save(fig, "debias_identifiability.png")
+
+
+def fig_fleet_tiering() -> None:
+    """Tier width vs car-level error: 5 pp tiers are the practical floor."""
+    d = _load("debias_transfer.json")["D"]
+    cl = pd.read_parquet(os.path.join(MET, "debias_transfer_fleet.parquet"))
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.0, 3.7))
+    w = [g["width_pp"] for g in d["grid"]]
+    for key, col, lab in (("mis_pct_sigma0.5", C_MAIN, "car-level σ = 0.5 pp"),
+                          ("mis_pct_sigma1.05", C_RED, "car-level σ = 1.05 pp")):
+        axes[0].plot(w, [g[key] for g in d["grid"]], "-o", ms=4, lw=1.5,
+                     color=col, label=lab)
+    axes[0].axhline(5, color=C_GRAY, lw=1.0, ls=":")
+    axes[0].set_ylim(0, 72)
+    axes[0].set_xlabel("Tier width (pp)")
+    axes[0].set_ylabel("Mis-tiered cars (%)")
+    axes[0].set_title("Tier width must exceed 3–4σ to be meaningful", fontsize=9.2, pad=8)
+    axes[0].legend(fontsize=7.2, loc="upper right", framealpha=0.92)
+
+    axes[1].scatter(cl["t_dev"], cl["shift_pp"], s=12, color=C_MAIN, alpha=0.7,
+                    edgecolor="none")
+    axes[1].axhline(0, color=C_GRAY, lw=0.8, ls=":")
+    axes[1].axvline(0, color=C_GRAY, lw=0.8, ls=":")
+    axes[1].set_xlabel("Reporting window vs full-history mean temperature (°C)")
+    axes[1].set_ylabel("SOH change from debiasing (pp)")
+    axes[1].set_title(f"Season alone flips {d['tier5_shift_pct']:.0f}% of cars "
+                      f"at 5 pp tiers", fontsize=9.2, pad=8)
+    _save(fig, "fleet_tiering.png")
+
+
 def main() -> None:
     print("writing README figures ->", os.path.relpath(OUT, ROOT))
     fig_hero()
@@ -834,6 +899,8 @@ def main() -> None:
     fig_decision_limits()
     fig_temperature_confound()
     fig_reference_temperature()
+    fig_debias_identifiability()
+    fig_fleet_tiering()
     print("done")
 
 

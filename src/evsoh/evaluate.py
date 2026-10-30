@@ -121,6 +121,37 @@ def pit_histogram(y_true: np.ndarray, lo: np.ndarray, med: np.ndarray, hi: np.nd
     return hist, edges
 
 
+def tier_error_rate(values: np.ndarray, edges: np.ndarray, sigma: float,
+                    n_draw: int = 2000, seed: int = 42) -> Dict[str, float]:
+    """车队分档的错档率：把"报告值 ± 误差"落到档位上，统计被分错的比例。
+
+    ``values`` 是每辆车的上报值（SOH，pp），``edges`` 是升序档位边界，
+    ``sigma`` 是车级误差（pp）。真值按 ``N(value, sigma²)`` 抽 ``n_draw`` 次，
+    逐车算"真档 ≠ 报档"的频率再对车取平均。
+
+    另外返回 ``boundary_share``：上报值落在某个边界 ±σ 之内的车辆占比。
+    这个量比错档率更早给出警报——它只依赖我们自己的估计，不需要知道真值。
+    """
+    v = np.asarray(values, dtype=float)
+    e = np.asarray(edges, dtype=float)
+    v = v[np.isfinite(v)]
+    if v.size == 0 or e.size < 2:
+        raise ValueError("tier_error_rate: 样本或边界不足")
+    if sigma < 0:
+        raise ValueError("tier_error_rate: sigma 不能为负")
+    assigned = np.digitize(v, e)
+    if sigma == 0:
+        return {"mis_rate": 0.0, "boundary_share": 0.0, "n": int(v.size),
+                "n_tiers": int(len(np.unique(assigned)))}
+    rng = np.random.default_rng(seed)
+    draw = v[:, None] + rng.normal(0.0, float(sigma), (v.size, int(n_draw)))
+    truth = np.digitize(draw, e)
+    mis = (truth != assigned[:, None]).mean(axis=1)
+    near = np.min(np.abs(v[:, None] - e[None, :]), axis=1) < sigma
+    return {"mis_rate": float(mis.mean()), "boundary_share": float(near.mean()),
+            "n": int(v.size), "n_tiers": int(len(np.unique(assigned)))}
+
+
 def conformal_by_car(cars: np.ndarray, y: np.ndarray, pred: np.ndarray,
                      nominal: float = 0.90, cal_frac: float = 0.25,
                      n_splits: int = 5, seed: int = 42) -> Dict[str, float]:

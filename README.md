@@ -682,6 +682,77 @@ Car level (last 8 sessions, 187 cars): SOH shifts by a median **0.71 pp**, corre
   <img src="docs/figures/reference_temperature.png" width="740" alt="RMSE by temperature bin before and after re-basing, and car-level SOH before and after">
 </p>
 
+### 14. The limit of re-basing: one line cannot bend around different cars
+
+The previous section produced a single global temperature slope and showed that re-basing to 25 °C is free.
+But that line is an average over 187 cars, and per vendor the two halves differ by a factor of two
+(ds1 0.0327 / ds2 0.0682). So why not fit a slope **per car**?
+
+Because you cannot estimate it, and you do not need it.
+
+**A per-car slope looks precise and does not replicate.** Fitting each car separately gives a median
+slope of 0.0442 with a between-car SD of 0.0468, 91% positive, and a median standard error of just
+0.0061 — every car looks well estimated. Now split each car's own history into the first 60% and the
+last 40%: the two halves correlate at **0.235**, and the rms gap is 0.087 Ah/°C — its variance is
+**5.5× the sampling noise** of that comparison. Most of the apparent between-car heterogeneity does
+not survive inside one car.
+
+Getting the slope itself right needs **180–250 sessions** (the median car has 207): at n=90 the rms
+error is still 0.042, at n=180 it is 0.029. In deployment that reads "you know a car's slope when it
+is nearly retired".
+
+| λ (weight on the car's own slope) | 0 (global) | 0.2 | 0.4 | 0.6 | 0.8 | 1.0 | no re-base | oracle |
+|---|---|---|---|---|---|---|---|---|
+| Median held-out residual SD (Ah) | 0.5296 | **0.5252** | 0.5277 | 0.5363 | 0.5419 | 0.5465 | 0.5611 | 0.5297 |
+
+Re-basing itself is worth 5.6%; personalising the slope adds at most 0.8%, and using the own slope
+outright is 3.2% *worse* than the global one — **the own slope wins on only 43% of cars**. Even the
+oracle (the full-history slope treated as truth) merely ties the global line. Per-car re-basing has a
+ceiling below 1% and an unstable sign.
+
+**Vendor-level re-basing is worth 1.2%.** Leave-one-car-out, so the evaluated car never enters any
+slope estimate:
+
+| Slope used | Pooled residual SD (Ah) | vs no re-base | vs global |
+|---|---|---|---|
+| none | 0.744 | — | — |
+| global | 0.684 | −8.1% | — |
+| tier | **0.676** | −9.2% | **+1.2%** |
+| own history (oracle) | 0.642 | −13.8% | +6.1% |
+
+The tier differences are real (median per-car slope 0.0360 / 0.0645 / 0.0434, matching the fixed-effects
+estimates), but only part of ds2 cashes in (paired difference −0.015 Ah, 59% win rate; ds1 is −0.003 Ah).
+Without a vendor label, the global line already captures nine tenths of the gain.
+
+**What is left after re-basing is a step, not a slope.** Taking the debiased label against the model
+trained on it, and splitting each car's history in half: ΔT explains **4.0%** (coefficient −0.010, sign
+reversed), operating conditions 17%, together 20%, three quarters unexplained. And **61% of the bias
+variance sits between copy blocks** rather than inside them — it behaves like a change of estimation
+recipe, not a continuous tilt. That closes the loop on the previous section: the drift is not seasonal,
+probably not operational, and most likely the on-vehicle capacity estimator switching between blocks.
+
+<p align="center">
+  <img src="docs/figures/debias_identifiability.png" width="740" alt="Per-car slope from the first 60% versus the last 40%, and held-out residual versus the weight on the own slope">
+</p>
+
+**How wide must a fleet tier be?** Car level (last 8 sessions, re-based): SOH spans 82.2–99.7%, and
+re-basing shifts it by a median 0.71 pp. Pure sampling error is only 0.49 pp, but the measured car-level
+error is 1.05 pp (section 12) — the difference is exactly the bias drift, so **design the tier width
+against the larger number**:
+
+| Tier width | 1.0 | 2.0 | 2.5 | 3.0 | 5.0 pp |
+|---|---|---|---|---|---|
+| Mis-tiered (σ = 0.5 pp) | 39% | 19% | 17% | 13% | **9%** |
+| Mis-tiered (σ = 1.05 pp) | 65% | 40% | 34% | 28% | **17%** |
+
+In one sentence: **a tier width must exceed 3–4σ**. And without re-basing, **15% (28/187)** of cars land
+in a different tier at a 5 pp width purely because of the season they were measured in — an argument
+that lands better with the business side than "re-basing improves accuracy".
+
+<p align="center">
+  <img src="docs/figures/fleet_tiering.png" width="740" alt="Tier width versus mis-tier rate, and the SOH shift from re-basing versus the window's temperature offset">
+</p>
+
 ### Verdict
 
 | Direction | What was tried | Outcome |
@@ -695,6 +766,7 @@ Car level (last 8 sessions, 187 cars): SOH shifts by a median **0.71 pp**, corre
 | D7 Reporting unit | (k, m) grid of averaging × labelled sessions, six aggregators, bias-drift model, additivity check | The two levers are exactly additive (0.888 → 0.469 Ah, −47%); k saturates at 8 (k_eff 5.4); robust aggregators all fail; personalisation recovers 56% of bias because the rest drifts |
 | D8 Streaming calibration | Online sequential bias with forgetting, label cadence sweep, block-noise-aware evaluation, car-level decision metrics | Forgetting beats accumulating (0.821 → 0.687 Ah); forget per label, not per calendar; the cut saturates at 14–17% after the 10th label; block weighting in training does nothing; car level 0.446 Ah (1.05 pp), resolution ≈ 2 pp |
 | D9 Temperature confound | Within-car FE + first differences + de-duplicated blocks, label noise by temperature, re-basing at 25 °C and retraining | The label carries +0.0449 Ah/°C and the model copies 1.008× of it; a seasonal swing equals 32,000 km of ageing; re-basing costs nothing (0.8184 → 0.8145 Ah) and removes the drift (0.0455 → 0.0014) |
+| D10 Limit of re-basing | Per-car slope identifiability, learning curve, λ sweep, leave-one-car-out tiers, drift attribution, tier resolution | Per-car slopes do not replicate (ρ = 0.235 across halves); per-car re-basing < 1%, per-vendor 1.2%; 61% of the remaining drift sits between copy blocks; tiers need ≥ 3–4σ (17% mis-tiered at 5 pp with σ = 1.05 pp; 15% flip by season without re-basing) |
 
 ## Limitations
 
@@ -704,6 +776,9 @@ Car level (last 8 sessions, 187 cars): SOH shifts by a median **0.71 pp**, corre
 - **Unsupervised feature alignment hurts** on this task, in both its first-order (z-score, 0.882 → 2.341 Ah) and second-order (CORAL, 0.884 → 2.024 Ah) forms. The negative result is reported rather than tuned away, because it bounds what domain adaptation can do without labels.
 - **Explicit IC peak descriptors do not beat the IC bins**, and a 10 mV grid does not beat 50 mV. Peak features buy interpretability, not accuracy; both findings are negative and both are kept.
 - **Personalization gains are limited by drift in per-car bias.** The repository reports both the potential ceiling and the deployable number; neither is quoted alone. A per-car affine correction is never worth its extra parameters here.
+- **The temperature slope cannot be estimated per car.** A per-car standard error of 0.006 looks reassuring, but the two halves of one car's history correlate at only 0.235; per-car re-basing beats the global line on 43% of cars and has a ceiling below 1%. What is deployable is one global line plus, optionally, one line per vendor — not one per car.
+- **The residual bias drift is still not attributed to a mechanism.** After re-basing it is unrelated to temperature (R² 0.04), operating conditions explain 17%, and 61% of its variance sits between label copy blocks. It is fair to say "a step in the measurement recipe", not "which step" — that needs BMS software versions or calibration records, which this dataset does not carry.
+- **The tiering result depends on an error assumption.** Mis-tier rates assume independent, Gaussian car-level errors; the real error carries a block-wide seasonal bias (same fleet, same season, same sign), so real mis-tiering will cluster by fleet. Tier boundaries are also SOH thresholds, not residual-value or warranty thresholds.
 - **Every capacity and SOH figure is quoted at the session's own temperature.** Re-basing to 25 °C moves car-level SOH by a median 0.71 pp, so cross-season comparisons must be normalised first. Temperature also cannot be separated from usage intensity here: fast-charging cars run hotter *and* age faster, and the dataset carries no ambient or charging-power channel to break the tie.
 - **The quality gate is a coverage trade, not a modelling gain.** It lowers MAE only by refusing to score 20–54% of sessions, which is fine for fleet screening and useless if every vehicle must get a number.
 - **Robustness was not achieved by feature filtering.** Removing C-rate/temperature-sensitive features costs 3.6% RMSE and makes the hot stratum 11% worse, without narrowing the cold/hot gap. Temperature compensation needs an explicit physical model.
