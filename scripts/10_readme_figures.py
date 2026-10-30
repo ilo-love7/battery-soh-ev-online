@@ -694,8 +694,7 @@ def fig_decision_limits() -> None:
                  lw=1.5, color=C_GRAY, label="zero-shot")
     axes[1].plot(scr["picked_pct"], [v * 100 for v in scr["online"]], marker="o", ms=3.6,
                  lw=1.8, color=C_MAIN, label="online calibration")
-    axes[1].plot([0, max(scr["picked_pct"])],
-                 [0, min(100.0, max(scr["picked_pct"]) / 10 * 100)],
+    axes[1].plot([0, 10, max(scr["picked_pct"])], [0, 100, 100],
                  ls=":", lw=1.0, color=C_RED, label="random inspection")
     axes[1].axvline(10, color=C_GRAY, ls="--", lw=0.9)
     axes[1].set_xlabel("Inspection budget (% of fleet)")

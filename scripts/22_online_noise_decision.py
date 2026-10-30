@@ -666,9 +666,9 @@ def plots(res: dict, cl: pd.DataFrame, fig_dir: str) -> None:
                  color=C_GRAY, label="零样本")
     axes[1].plot(xs, [v * 100 for v in scr["online"]], marker="o", ms=3.6, lw=1.8,
                  color=C_MAIN, label="在线标定")
-    # 随机抽检：名额 p% 只能覆盖 p/10 的差车（差车占车队 10%），超过 10% 名额即 100%
-    axes[1].plot([0, max(xs)], [0, min(100.0, max(xs) / 10 * 100)], ls=":", lw=1.0,
-                 color=C_RED, label="随机抽检")
+    # 随机抽检：名额 p% 只能覆盖 p/10 的差车（差车占车队 10%），到 10% 名额即 100%，之后转平
+    xs_r = [0, 10, max(xs)]
+    axes[1].plot(xs_r, [0, 100, 100], ls=":", lw=1.0, color=C_RED, label="随机抽检")
     axes[1].axvline(10, color=C_GRAY, ls="--", lw=0.9)
     axes[1].annotate(f"10% 名额：{wd['zero']['recall']*100:.0f}% → "
                      f"{wd['online']['recall']*100:.0f}%", (10, wd["online"]["recall"] * 100),
