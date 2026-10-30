@@ -727,6 +727,92 @@ def fig_decision_limits() -> None:
     _save(fig, "decision_limits.png")
 
 
+def fig_temperature_confound() -> None:
+    """The label itself is temperature-dependent, and the model copies it."""
+    d = _load("temperature_confound.json")["A"]
+    rows = d["bins"]["rows"]
+    ts = [r["t"] for r in rows]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.4, 3.7))
+    axes[0].plot(ts, [r["cap_w"] for r in rows], "o-", color=C_MAIN, ms=4.6, lw=1.6,
+                 label="capacity label")
+    axes[0].plot(ts, [r["pred_w"] for r in rows], "s--", color=C_ACC, ms=4.2, lw=1.5,
+                 label="model prediction")
+    axes[0].axhline(0, color=C_GRAY, lw=0.9, ls=":")
+    axes[0].axvline(25, color=C_GRAY, lw=0.9, ls=":")
+    axes[0].set_xlabel("Session mean battery temperature (°C)")
+    axes[0].set_ylabel("Capacity, car-demeaned (Ah)")
+    axes[0].set_title("Both the label and the model rise ~0.045 Ah/°C", fontsize=9.2, pad=8)
+    axes[0].legend(fontsize=7.4, loc="lower right", framealpha=0.92)
+
+    nb = d["noise_by_temp"]
+    xs = [r["t"] for r in nb]
+    axes[1].plot(xs, [r["sd"] for r in nb], "o-", color=C_RED, ms=5, lw=1.7,
+                 label="label scatter (SD vs local median)")
+    axes[1].plot(xs, [r["rmse_pred"] for r in nb], "s--", color=C_MAIN, ms=4.4, lw=1.4,
+                 label="prediction RMSE vs label")
+    for x, r in zip(xs, nb):
+        axes[1].annotate(f"{r['sd']:.2f}", (x, r["sd"]), textcoords="offset points",
+                         xytext=(0, -12), fontsize=6.9, color=C_RED, ha="center")
+    axes[1].set_ylim(0, max(r["rmse_pred"] for r in nb) * 1.22)
+    axes[1].set_xlabel("Session mean battery temperature (°C)")
+    axes[1].set_ylabel("Ah")
+    axes[1].set_title("Cold sessions are noisier even in the label itself", fontsize=9.2, pad=8)
+    axes[1].legend(fontsize=7.4, loc="upper right", framealpha=0.92)
+
+    out = os.path.join(OUT, "temperature_confound.png")
+    fig.tight_layout()
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
+def fig_reference_temperature() -> None:
+    """Retraining at a reference temperature: no accuracy cost, and the drift goes away."""
+    d = _load("temperature_confound.json")["C"]
+    cl = pd.read_parquet(os.path.join(MET, "temperature_cars.parquet"))
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.4, 3.7))
+    names = [k for k in ("冷", "中", "热") if k in d["by_temp"]["rows"]]
+    label_en = {"冷": "cold", "中": "mild", "热": "hot"}
+    xi = np.arange(len(names))
+    base = [d["by_temp"]["rows"][k]["base"] for k in names]
+    ref = [d["by_temp"]["rows"][k]["ref"] for k in names]
+    axes[0].bar(xi - 0.19, base, width=0.36, color=C_GRAY, label="trained on raw label")
+    axes[0].bar(xi + 0.19, ref, width=0.36, color=C_MAIN, label="trained at 25 °C")
+    for i in range(len(names)):
+        axes[0].text(i - 0.19, base[i] + 0.012, f"{base[i]:.3f}", ha="center", fontsize=7.2)
+        axes[0].text(i + 0.19, ref[i] + 0.012, f"{ref[i]:.3f}", ha="center", fontsize=7.2)
+    axes[0].set_xticks(xi)
+    axes[0].set_xticklabels([f"{label_en[k]}\n({d['by_temp']['rows'][k]['t_mean']:.0f} °C)"
+                             for k in names], fontsize=8)
+    axes[0].set_ylim(0, max(base) * 1.22)
+    axes[0].set_ylabel("RMSE against the 25 °C label (Ah)")
+    axes[0].set_title("Raw-label model is worse at both ends", fontsize=9.2, pad=8)
+    axes[0].legend(fontsize=7.2, loc="upper left", framealpha=0.92)
+    axes[0].grid(axis="x", visible=False)
+
+    axes[1].scatter(cl["soh_label"] * 100, cl["soh_label_ref"] * 100, s=12,
+                    color=C_MAIN, alpha=0.66, edgecolor="none")
+    axes[1].plot([80, 100], [80, 100], color=C_GRAY, lw=1.0, ls="--", label="y = x")
+    axes[1].axhline(90, color=C_RED, lw=0.9, ls=":")
+    axes[1].axvline(90, color=C_RED, lw=0.9, ls=":")
+    axes[1].set_xlim(80, 100)
+    axes[1].set_ylim(80, 100)
+    axes[1].set_xlabel("Car-level SOH, raw label (%)")
+    axes[1].set_ylabel("Car-level SOH at 25 °C (%)")
+    th = d["car_level"]["thresholds"]["0.90"]
+    axes[1].set_title(f"Same fleet, shifted answers: {th['raw']} → {th['ref']} cars below 90%",
+                      fontsize=9.2, pad=8)
+    axes[1].legend(fontsize=7.2, loc="upper left", framealpha=0.92)
+
+    out = os.path.join(OUT, "reference_temperature.png")
+    fig.tight_layout()
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", out)
+
+
 def main() -> None:
     print("writing README figures ->", os.path.relpath(OUT, ROOT))
     fig_hero()
@@ -746,6 +832,8 @@ def main() -> None:
     fig_budget_additivity()
     fig_online_calibration()
     fig_decision_limits()
+    fig_temperature_confound()
+    fig_reference_temperature()
     print("done")
 
 

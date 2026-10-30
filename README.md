@@ -202,6 +202,7 @@ python scripts/19_model_frontier.py        # 5 families × 4 feature sets × 6 v
 python scripts/20_interval_floor.py        # same-car averaging + label-noise floor + figures 35–36
 python scripts/21_aggregate_personalize.py # averaging x labelled sessions, aggregators, bias drift + figures 37–38
 python scripts/22_online_noise_decision.py # streaming calibration, block noise, decision metrics + figures 39–41, ~3 min
+python scripts/23_temperature_confound.py  # temperature confound, 25 °C re-basing, retrain + figures 42–44, ~6 min
 ```
 
 `EVBATTERY_ROOT` must point at the directory containing `battery_dataset1/2/3`. Scripts 17 and 18 need either the raw pickles or the caches from steps 01–02; everything else reads only `session_features.parquet`.
@@ -637,6 +638,50 @@ The car-level error distribution is not carried by the average: median **0.236 A
   <img src="docs/figures/decision_limits.png" width="740" alt="Downstream value: ranking resolution, screening recall and car-level interval width">
 </p>
 
+### 13. The label is not a fixed ruler, and the model copies it
+
+Every number above was read as "how far the model is from the label". That treats the label as a fixed ruler. It is not. Within one car, controlling for mileage, **the capacity label rises 0.0449 Ah/°C (≈0.11 %/°C)** of battery temperature, and the model reproduces **1.008×** of that slope. The problem is not accuracy — it is that a summer SOH and a winter SOH are not the same quantity.
+
+Estimation is done inside each car (fixed effects), because temperature is strongly confounded with the car: warm-region vehicles differ in BOL capacity too. Three estimators must agree — level FE, first differences (kills the car effect *and* any linear ageing trend), and de-duplicated blocks.
+
+| Estimator | Label (Ah/°C) | Prediction (Ah/°C) | Ratio |
+|---|---|---|---|
+| FE, temperature only | 0.0576 | 0.0571 | 0.99 |
+| FE + mileage | **0.0449** [0.0391, 0.0509] | 0.0452 [0.0417, 0.0492] | **1.008** [0.944, 1.082] |
+| FE + mileage + conditions | 0.0457 | 0.0459 | 1.00 |
+| First differences | 0.0484 | 0.0363 | 0.75 |
+| First differences, adjacent <3000 km | 0.0491 | 0.0363 | 0.74 |
+| Block heads only | 0.0459 | 0.0453 | 0.99 |
+
+The first row is the trap: temperature and mileage rise together over a car's life, so omitting mileage inflates the slope by 28%. It is not a marginal slip either — 91.4% of the 187 cars have a positive slope on their own (median 0.054), and the response saturates above ~33°C (0.0498 below the knot, 0.0123 above), consistent with reversible capacity peaking at 35–40°C.
+
+At the level, the model copies the dependence completely; in first differences it follows only three quarters of it, i.e. it smooths session-to-session swings. And the residual carries **no** temperature term at all — which is why the "bias drift" of section 11 is *not* seasonal: subtracting temperature from the label before measuring drift makes the two-half correlation fall from 0.752 to 0.582. A useful negative.
+
+**Cold sessions are noisier even in the label.** Scatter against the car's own local median, by temperature quartile: 0.771 / 0.588 / 0.491 / 0.358 Ah, and the prediction error tracks it almost proportionally (1.023 / 0.848 / 0.721 / 0.658). Part of the 2.54× cold/hot error spread reported in section 6 was never the model's fault.
+
+**Re-basing at 25 °C is free.** Fit the correction per training fold (test cars never contribute) and retrain:
+
+| Trained on | Evaluated against | RMSE (Ah) | MAE (Ah) |
+|---|---|---|---|
+| Raw label | raw label | 0.8184 | 0.5544 |
+| Raw label | 25 °C label | 0.8894 | 0.6368 |
+| 25 °C label | 25 °C label | **0.8145** | **0.5525** |
+| 25 °C label | raw label | 0.8824 | 0.6236 |
+
+No accuracy cost (−0.5%), and the prediction's temperature slope collapses from 0.0455 to **0.0014** — the feature is still there, the model just stops using it. The flip side: 8.7% of the original model's apparent skill is borrowed from the ruler.
+
+Car level (last 8 sessions, 187 cars): SOH shifts by a median **0.71 pp**, correlated −0.83 with how much warmer those 8 sessions were than the car's own history. Rankings barely move (Spearman 0.982) and the worst-decile list keeps 18 of 19 — but at a 90% threshold 8 cars change side, at 92% twelve do.
+
+**Why averaging more does not help.** A seasonal swing is 2.49 pp ≈ **32,000 km of real ageing**, but temperature is a slow wave: median span across a car's history is 26.9 °C against 6.96 °C inside the last-8 window (lag-1 autocorrelation 0.882). Eight consecutive sessions sit in one season, so averaging removes label noise, not season. The residual is 0.64 pp (SD), i.e. **61%** of the 1.05 pp car-level MAE from section 12.
+
+<p align="center">
+  <img src="docs/figures/temperature_confound.png" width="740" alt="Within-car capacity and prediction versus battery temperature, and label scatter by temperature">
+</p>
+
+<p align="center">
+  <img src="docs/figures/reference_temperature.png" width="740" alt="RMSE by temperature bin before and after re-basing, and car-level SOH before and after">
+</p>
+
 ### Verdict
 
 | Direction | What was tried | Outcome |
@@ -649,6 +694,7 @@ The car-level error distribution is not carried by the average: median **0.236 A
 | D6 Axis audit | 5 families × 4 feature sets, 6 tuning variants, same-car averaging, label noise measured directly | Non-linearity is worth 11.5%, the choice of family 3.2%, tuning 1.7%; the representation has no upside left; k=8 averaging takes the width from 2.53 to 1.62 Ah |
 | D7 Reporting unit | (k, m) grid of averaging × labelled sessions, six aggregators, bias-drift model, additivity check | The two levers are exactly additive (0.888 → 0.469 Ah, −47%); k saturates at 8 (k_eff 5.4); robust aggregators all fail; personalisation recovers 56% of bias because the rest drifts |
 | D8 Streaming calibration | Online sequential bias with forgetting, label cadence sweep, block-noise-aware evaluation, car-level decision metrics | Forgetting beats accumulating (0.821 → 0.687 Ah); forget per label, not per calendar; the cut saturates at 14–17% after the 10th label; block weighting in training does nothing; car level 0.446 Ah (1.05 pp), resolution ≈ 2 pp |
+| D9 Temperature confound | Within-car FE + first differences + de-duplicated blocks, label noise by temperature, re-basing at 25 °C and retraining | The label carries +0.0449 Ah/°C and the model copies 1.008× of it; a seasonal swing equals 32,000 km of ageing; re-basing costs nothing (0.8184 → 0.8145 Ah) and removes the drift (0.0455 → 0.0014) |
 
 ## Limitations
 
@@ -658,6 +704,7 @@ The car-level error distribution is not carried by the average: median **0.236 A
 - **Unsupervised feature alignment hurts** on this task, in both its first-order (z-score, 0.882 → 2.341 Ah) and second-order (CORAL, 0.884 → 2.024 Ah) forms. The negative result is reported rather than tuned away, because it bounds what domain adaptation can do without labels.
 - **Explicit IC peak descriptors do not beat the IC bins**, and a 10 mV grid does not beat 50 mV. Peak features buy interpretability, not accuracy; both findings are negative and both are kept.
 - **Personalization gains are limited by drift in per-car bias.** The repository reports both the potential ceiling and the deployable number; neither is quoted alone. A per-car affine correction is never worth its extra parameters here.
+- **Every capacity and SOH figure is quoted at the session's own temperature.** Re-basing to 25 °C moves car-level SOH by a median 0.71 pp, so cross-season comparisons must be normalised first. Temperature also cannot be separated from usage intensity here: fast-charging cars run hotter *and* age faster, and the dataset carries no ambient or charging-power channel to break the tie.
 - **The quality gate is a coverage trade, not a modelling gain.** It lowers MAE only by refusing to score 20–54% of sessions, which is fine for fleet screening and useless if every vehicle must get a number.
 - **Robustness was not achieved by feature filtering.** Removing C-rate/temperature-sensitive features costs 3.6% RMSE and makes the hot stratum 11% worse, without narrowing the cold/hot gap. Temperature compensation needs an explicit physical model.
 - **The working condition fix needs a neural network.** Gradient reversal cuts the coldest-bin MAE by 11.6%, but it requires an MLP — an order of magnitude slower than XGBoost, with two extra hyper-parameters. Deploying it on-vehicle would need distillation back into a tree model, which is not done here.
