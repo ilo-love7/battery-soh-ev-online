@@ -55,12 +55,21 @@ I_LABELS = ["<15", "15-17", "17-19", ">19"]
 T_ADV_EDGES = [-10.0, 15.0, 22.0, 28.0, 60.0]
 
 
+def _labels(edges: list, labels: list, x: np.ndarray) -> np.ndarray:
+    """分箱结果转成字符串数组。
+
+    ``Categorical.astype(str)`` 在 pandas 2.x 返回 ndarray、3.x 返回 Index，
+    两者都有 ``.to_numpy`` 的只有后者，所以统一走 ``np.asarray``。
+    """
+    return np.asarray(pd.cut(x, edges, labels=labels).astype(str), dtype=object)
+
+
 def temp_bin(t: np.ndarray) -> np.ndarray:
-    return pd.cut(t, T_EDGES, labels=T_LABELS).astype(str).to_numpy()
+    return _labels(T_EDGES, T_LABELS, t)
 
 
 def cur_bin(i: np.ndarray) -> np.ndarray:
-    return pd.cut(i, I_EDGES, labels=I_LABELS).astype(str).to_numpy()
+    return _labels(I_EDGES, I_LABELS, i)
 
 
 def strata_report(y, pred, t, i, min_n: int = 80) -> dict:
