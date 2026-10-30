@@ -336,7 +336,7 @@ The cold/hot MAE ratio barely moves (2.0× → 1.8×) while the hot stratum gets
 | Direction | What was tried | Outcome |
 |---|---|---|
 | D1 IC shape | 20 peak descriptors, 50 mV → 10 mV re-sampling | Peaks are real, accuracy does not improve — keep the bins |
-| D2 Cross-car | 191-fold LOVO, error decomposition, CORAL | 5-fold was honest; 56% of error is car identity; alignment hurts |
+| D2 Cross-car | 191-fold LOVO, error decomposition, CORAL | 5-fold was honest; car identity explains 56% of the variance; alignment hurts |
 | D3 Uncertainty | CQR vs CV+ vs normalized conformal | **CQR wins on conditional coverage** — method changed |
 | D4 Cold start | bias / affine / ridge / active selection | One bias term only; active selection doubles the gain |
 | D5 Quality | rejection gate, robust feature subset | Gate works (13.8%); robust subset fails (+3.6% cost, no robustness) |
