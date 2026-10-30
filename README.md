@@ -204,7 +204,7 @@ tools/soh_estimator.py  end-to-end CLI (pkl → capacity / SOH / quality)
 examples/sample_sessions/  3 real sessions, 38 window files
 docs/figures/           the eight English-labelled figures in this README
 results/models/         xgb_capacity.joblib (3.5 MB, committed)
-reports/                full Chinese evaluation report (650 lines, all numbers)
+reports/                full Chinese evaluation report (655 lines, all numbers)
 ```
 
 ## Going deeper

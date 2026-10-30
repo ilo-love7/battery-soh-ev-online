@@ -204,7 +204,7 @@ tools/soh_estimator.py  端到端 CLI（pkl → 容量 / SOH / 质量分）
 examples/sample_sessions/  3 段真实会话，38 个窗口文件
 docs/figures/           README 里的英文标注图
 results/models/         xgb_capacity.joblib（3.5 MB，随仓库发布）
-reports/                完整中文评测报告（650 行，全部数据与结论）
+reports/                完整中文评测报告（655 行，全部数据与结论）
 ```
 
 ## 再往深处
