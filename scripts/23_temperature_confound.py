@@ -22,7 +22,7 @@
 输出
   results/metrics/temperature_confound.json
   results/metrics/temperature_oof.parquet（逐会话的原始/折算标签与两版预测）
-  results/figures/fig42_温度响应的三层证据.png
+  results/figures/fig42_温度响应的四层证据.png
   results/figures/fig43_参考温度重训.png
   results/figures/fig44_季节摆幅与报告口径.png
 """
@@ -445,7 +445,7 @@ def plots(res: dict, d: pd.DataFrame, fig_dir: str) -> None:
     beta_lab = A["label"]["fe_t_km"]["beta"]
     beta_prd = A["pred"]["fe_t_km"]["beta"]
 
-    # ---- 图 42：温度响应的四层证据
+    # ---- 图 42：温度响应的四层证据（四栏各有分工，缺一不可）
     fig, axes = plt.subplots(2, 2, figsize=(10.6, 7.2))
     axes = axes.ravel()
     rows = A["bins"]["rows"]
@@ -515,7 +515,7 @@ def plots(res: dict, d: pd.DataFrame, fig_dir: str) -> None:
     axes[3].set_title("④ 冷天连标签自己都不稳：误差只是跟着标签走", fontsize=9.8, pad=8)
     axes[3].legend(fontsize=7.2, loc="upper right", framealpha=0.92)
     axes[3].set_ylim(0, max(r["rmse_pred"] for r in nb) * 1.22)
-    savefig(fig, os.path.join(fig_dir, "fig42_温度响应的三层证据.png"))
+    savefig(fig, os.path.join(fig_dir, "fig42_温度响应的四层证据.png"))
 
     if C.get("skipped"):
         return
