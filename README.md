@@ -234,7 +234,7 @@ The 25 binned values already contain what the peaks summarise, and peaks throw a
 
 ### 2. Strict leave-one-car-out: the 5-fold number was not flattering itself
 
-The headline protocol groups by car in 5 folds, which leaves ~38 training cars in common between any two test folds. Re-running as **191 folds, one car held out at a time** (913 s, 8 processes):
+The headline protocol groups by car in 5 folds, so any two training sets still share roughly **115 of the 191 cars** — the folds are not independent. Re-running as **191 folds, one car held out at a time** (913 s, 8 processes):
 
 | Protocol | RMSE (Ah) | MAE (Ah) | R² | SOH RMSE (pp) |
 |---|---|---|---|---|
